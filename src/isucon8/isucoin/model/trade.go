@@ -77,6 +77,8 @@ func appendCandleStick(data *[]*CandlestickData, ts uint64, price int64, id int6
 }
 
 func UpdateCandleStickData(d QueryExecutor) error {
+	candleStickMutex.Lock()
+	defer candleStickMutex.Unlock()
 	query := `
 			SELECT
 				UNIX_TIMESTAMP(STR_TO_DATE(DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s'), '%Y-%m-%d %H:%i:%s')) as t,
@@ -107,6 +109,8 @@ func UpdateCandleStickData(d QueryExecutor) error {
 }
 
 func getCandleStick(data []*CandlestickData, ts uint64) []*CandlestickData {
+	candleStickMutex.RLock()
+	defer candleStickMutex.RUnlock()
 	low := 0
 	high := len(data)
 	// data.TimeSec >= tsのデータを取得する
@@ -118,7 +122,7 @@ func getCandleStick(data []*CandlestickData, ts uint64) []*CandlestickData {
 			high = mid
 		}
 	}
-	return data[low:]
+	return append(make([]*CandlestickData, 0), data[low:]...)
 }
 
 func GetCandlestick1Sec(mt time.Time) []*CandlestickData {

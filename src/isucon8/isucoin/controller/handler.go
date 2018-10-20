@@ -69,6 +69,7 @@ func (h *Handler) Initialize(w http.ResponseWriter, r *http.Request, _ httproute
 		}
 		return nil
 	})
+	model.UpdateCandleStickData(h.db)
 	if err != nil {
 		h.handleError(w, err, 500)
 	} else {
