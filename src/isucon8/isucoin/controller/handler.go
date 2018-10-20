@@ -70,18 +70,26 @@ func (h *Handler) Signup(w http.ResponseWriter, r *http.Request, _ httprouter.Pa
 		h.handleError(w, errors.New("all parameters are required"), 400)
 		return
 	}
+
+	if checkBan(bankID) {
+		h.handleError(w, errors.New("error: too many failures"), 403)
+		return
+	}
+
 	err := h.txScope(func(tx *sql.Tx) error {
 		return model.UserSignup(tx, name, bankID, password)
 	})
 	switch {
 	case err == model.ErrBankUserNotFound:
 		// TODO: 失敗が多いときに403を返すBanの仕様に対応
+		incrementBan(bankID)
 		h.handleError(w, err, 404)
 	case err == model.ErrBankUserConflict:
 		h.handleError(w, err, 409)
 	case err != nil:
 		h.handleError(w, err, 500)
 	default:
+		resetBan(bankID)
 		h.handleSuccess(w, struct{}{})
 	}
 }
@@ -89,34 +97,42 @@ func (h *Handler) Signup(w http.ResponseWriter, r *http.Request, _ httprouter.Pa
 var banList map[string]int
 var banMutex *sync.Mutex
 
+func checkBan(bankID string) bool {
+	banMutex.Lock()
+	defer banMutex.Unlock()
+	return banList[bankID] >= 5
+}
+
+func incrementBan(bankID string) {
+	banMutex.Lock()
+	defer banMutex.Unlock()
+	banList[bankID]++
+}
+func resetBan(bankID string) {
+	banMutex.Lock()
+	defer banMutex.Unlock()
+	banList[bankID] = 0
+}
+
 func (h *Handler) Signin(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	if banList == nil {
 		banList = make(map[string]int)
 		banMutex = &sync.Mutex{}
 	}
 	bankID := r.FormValue("bank_id")
-	banned := func () bool {
-		banMutex.Lock()
-		defer banMutex.Unlock()
-		return banList[bankID] >= 5
-	}()
-	if banned {
-		h.handleError(w, errors.New("error: too many failures"), 403)
-	}
 	password := r.FormValue("password")
 	if bankID == "" || password == "" {
 		h.handleError(w, errors.New("all parameters are required"), 400)
 		return
 	}
+	if checkBan(bankID) {
+		h.handleError(w, errors.New("error: too many failures"), 403)
+		return
+	}
 	user, err := model.UserLogin(h.db, bankID, password)
 	switch {
 	case err == model.ErrUserNotFound:
-		// TODO: 失敗が多いときに403を返すBanの仕様に対応
-		func () {
-			banMutex.Lock()
-			defer banMutex.Unlock()
-			banList[bankID]++
-		}()
+		incrementBan(bankID)
 		h.handleError(w, err, 404)
 	case err != nil:
 		h.handleError(w, err, 500)
@@ -131,11 +147,7 @@ func (h *Handler) Signin(w http.ResponseWriter, r *http.Request, _ httprouter.Pa
 			h.handleError(w, err, 500)
 			return
 		}
-		func () {
-			banMutex.Lock()
-			defer banMutex.Unlock()
-			banList[bankID] = 0
-		}()
+		resetBan(bankID)
 		h.handleSuccess(w, user)
 	}
 }
@@ -195,7 +207,6 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request, _ httprouter.Para
 		}
 		res["traded_orders"] = orders
 	}
-
 
 	bySecTime := BaseTime.Add(-300 * time.Second)
 	if lt.After(bySecTime) {
