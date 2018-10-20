@@ -32,7 +32,7 @@ func GetTradeByID(d QueryExecutor, id int64) (*Trade, error) {
 }
 
 func GetLatestTrade(d QueryExecutor) (*Trade, error) {
-	return scanTrade(d.Query("SELECT * FROM trade ORDER BY id DESC"))
+	return scanTrade(d.Query("SELECT * FROM trade ORDER BY id DESC LIMIT 1"))
 }
 
 func GetCandlestickData(d QueryExecutor, mt time.Time, tf string) ([]*CandlestickData, error) {
