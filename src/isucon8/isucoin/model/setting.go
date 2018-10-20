@@ -69,7 +69,14 @@ func Logger(d QueryExecutor) (*isulogger.Isulogger, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "getSetting failed. %s", LogAppid)
 	}
-	return isulogger.NewIsulogger(ep, id)
+	if isulogger.Logger == nil || isulogger.Logger.AppId != id || isulogger.Logger.EndPoint != ep {
+		// TODO: メモリリークを修正する
+		isulogger.Logger, err = isulogger.NewIsulogger(ep, id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return isulogger.Logger, nil
 }
 
 func sendLog(d QueryExecutor, tag string, v interface{}) {

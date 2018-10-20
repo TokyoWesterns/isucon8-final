@@ -99,7 +99,8 @@ var banList map[string]int
 var banMutex *sync.Mutex
 
 func checkBan(bankID string) bool {
-
+	//return false
+	//
 	if banList == nil {
 		banList = make(map[string]int)
 		banMutex = &sync.Mutex{}
@@ -110,11 +111,13 @@ func checkBan(bankID string) bool {
 }
 
 func incrementBan(bankID string) {
+	//return
 	banMutex.Lock()
 	defer banMutex.Unlock()
 	banList[bankID]++
 }
 func resetBan(bankID string) {
+	//return
 	banMutex.Lock()
 	defer banMutex.Unlock()
 	banList[bankID] = 0
@@ -252,7 +255,7 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request, _ httprouter.Para
 		res["highest_buy_price"] = highestBuyOrder.Price
 	}
 	// TODO: trueにするとシェアボタンが有効になるが、アクセスが増えてヤバイので一旦falseにしておく
-	res["enable_share"] = false
+	res["enable_share"] = true
 	h.handleSuccess(w, res)
 }
 
