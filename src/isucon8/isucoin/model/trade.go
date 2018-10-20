@@ -2,9 +2,9 @@ package model
 
 import (
 	"database/sql"
-	"fmt"
 	"isucon8/isubank"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -20,11 +20,12 @@ type Trade struct {
 
 //go:generate scanner
 type CandlestickData struct {
-	Time  time.Time `json:"time"`
-	Open  int64     `json:"open"`
-	Close int64     `json:"close"`
-	High  int64     `json:"high"`
-	Low   int64     `json:"low"`
+	Time    string `json:"time"`
+	TimeSec uint64
+	Open    int64 `json:"open"`
+	Close   int64 `json:"close"`
+	High    int64 `json:"high"`
+	Low     int64 `json:"low"`
 }
 
 func GetTradeByID(d QueryExecutor, id int64) (*Trade, error) {
@@ -35,25 +36,105 @@ func GetLatestTrade(d QueryExecutor) (*Trade, error) {
 	return scanTrade(d.Query("SELECT * FROM trade ORDER BY id DESC LIMIT 1"))
 }
 
-func GetCandlestickData(d QueryExecutor, mt time.Time, tf string) ([]*CandlestickData, error) {
-	query := fmt.Sprintf(`
-		SELECT m.t, a.price, b.price, m.h, m.l
-		FROM (
+var candleStick1Sec []*CandlestickData
+var candleStick1Min []*CandlestickData
+var candleStick1Hour []*CandlestickData
+var candleStickMutex *sync.RWMutex
+var candleStickLastIndex int64
+var candleStickBaseTime *time.Time
+
+func InitializeCandleStack(baseTime *time.Time) {
+	candleStickMutex = &sync.RWMutex{}
+	candleStickLastIndex = 0
+	candleStick1Sec = make([]*CandlestickData, 0, 1000)
+	candleStick1Min = make([]*CandlestickData, 0, 1000)
+	candleStick1Hour = make([]*CandlestickData, 0, 1000)
+	candleStickBaseTime = baseTime
+}
+
+func appendCandleStick(data *[]*CandlestickData, ts uint64, price int64, id int64) {
+	if len(*data) == 0 || (*data)[len(*data)-1].TimeSec != ts {
+		// Create
+		target := &CandlestickData{}
+		target.High = price
+		target.Low = price
+		target.Close = price
+		target.Open = price
+		target.TimeSec = ts
+		target.Time = time.Unix(int64(ts), 0).Format("2006-01-02T15:04:05+09:00")
+		*data = append(*data, target)
+	} else {
+		// Update
+		target := (*data)[len(*data)-1]
+		target.Close = price
+		if target.High < price {
+			target.High = price
+		}
+		if target.Low > price {
+			target.Low = price
+		}
+	}
+}
+
+func UpdateCandleStickData(d QueryExecutor) error {
+	query := `
 			SELECT
-				STR_TO_DATE(DATE_FORMAT(created_at, '%s'), '%s') AS t,
-				MIN(id) AS min_id,
-				MAX(id) AS max_id,
-				MAX(price) AS h,
-				MIN(price) AS l
+				UNIX_TIMESTAMP(STR_TO_DATE(DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s'), '%Y-%m-%d %H:%i:%s')) as t,
+				price,
+				id
 			FROM trade
-			WHERE created_at >= ?
-			GROUP BY t
-		) m
-		JOIN trade a ON a.id = m.min_id
-		JOIN trade b ON b.id = m.max_id
-		ORDER BY m.t
-	`, tf, "%Y-%m-%d %H:%i:%s")
-	return scanCandlestickDatas(d.Query(query, mt))
+			WHERE created_at >= ? AND id > ?
+			ORDER BY id
+	`
+	rows, err := d.Query(query, candleStickBaseTime.Add(-48*time.Hour), candleStickLastIndex)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var ts uint64
+		var price int64
+		var id int64
+		if err = rows.Scan(&ts, &price, &id); err != nil {
+			return err
+		}
+		// Update
+		appendCandleStick(&candleStick1Sec, ts, price, id)
+		appendCandleStick(&candleStick1Min, ts/60*60, price, id)
+		appendCandleStick(&candleStick1Hour, ts/3600*3600, price, id)
+		candleStickLastIndex = id
+	}
+	return nil
+}
+
+func getCandleStick(data []*CandlestickData, ts uint64) []*CandlestickData {
+	low := 0
+	high := len(data)
+	// data.TimeSec >= tsのデータを取得する
+	for low+1 < high {
+		mid := (low + high) / 2
+		if data[mid].TimeSec < ts {
+			low = mid
+		} else {
+			high = mid
+		}
+	}
+	return data[low:]
+}
+
+func GetCandlestick1Sec(mt time.Time) []*CandlestickData {
+	return getCandleStick(candleStick1Sec, uint64(mt.Unix()))
+}
+func GetCandlestick1Min(mt time.Time) []*CandlestickData {
+	return getCandleStick(candleStick1Min, uint64(mt.Unix()))
+}
+func GetCandlestick1Hour(mt time.Time) []*CandlestickData {
+	return getCandleStick(candleStick1Hour, uint64(mt.Unix()))
+}
+func GetCandlestickData(d QueryExecutor, mt time.Time, tf string) ([]*CandlestickData, error) {
+	if err := UpdateCandleStickData(d); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 func HasTradeChanceByOrder(d QueryExecutor, orderID int64) (bool, error) {

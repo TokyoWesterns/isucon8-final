@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"isucon8/isucoin/controller"
+	"isucon8/isucoin/model"
 	"log"
 	"net/http"
 	"os"
@@ -67,6 +68,7 @@ func main() {
 
 	h := controller.NewHandler(db, store)
 
+	model.InitializeCandleStack(&controller.BaseTime)
 	router := httprouter.New()
 	router.POST("/initialize", h.Initialize)
 	router.POST("/signup", h.Signup)

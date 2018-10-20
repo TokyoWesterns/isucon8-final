@@ -39,6 +39,7 @@ func NewHandler(db *sql.DB, store sessions.Store) *Handler {
 }
 
 func (h *Handler) Initialize(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	model.InitializeCandleStack(&BaseTime)
 	err := h.txScope(func(tx *sql.Tx) error {
 		if err := model.InitBenchmark(tx); err != nil {
 			return err
@@ -98,6 +99,11 @@ var banList map[string]int
 var banMutex *sync.Mutex
 
 func checkBan(bankID string) bool {
+
+	if banList == nil {
+		banList = make(map[string]int)
+		banMutex = &sync.Mutex{}
+	}
 	banMutex.Lock()
 	defer banMutex.Unlock()
 	return banList[bankID] >= 5
@@ -115,10 +121,6 @@ func resetBan(bankID string) {
 }
 
 func (h *Handler) Signin(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	if banList == nil {
-		banList = make(map[string]int)
-		banMutex = &sync.Mutex{}
-	}
 	bankID := r.FormValue("bank_id")
 	password := r.FormValue("password")
 	if bankID == "" || password == "" {
@@ -207,36 +209,28 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request, _ httprouter.Para
 		}
 		res["traded_orders"] = orders
 	}
+	if err := model.UpdateCandleStickData(h.db); err != nil {
+		h.handleError(w, errors.Wrap(err, "model.GetCandlestickData by sec"), 500)
+		return
+	}
 
 	bySecTime := BaseTime.Add(-300 * time.Second)
 	if lt.After(bySecTime) {
 		bySecTime = time.Date(lt.Year(), lt.Month(), lt.Day(), lt.Hour(), lt.Minute(), lt.Second(), 0, lt.Location())
 	}
-	res["chart_by_sec"], err = model.GetCandlestickData(h.db, bySecTime, "%Y-%m-%d %H:%i:%s")
-	if err != nil {
-		h.handleError(w, errors.Wrap(err, "model.GetCandlestickData by sec"), 500)
-		return
-	}
+	res["chart_by_sec"] = model.GetCandlestick1Sec(bySecTime)
 
 	byMinTime := BaseTime.Add(-300 * time.Minute)
 	if lt.After(byMinTime) {
 		byMinTime = time.Date(lt.Year(), lt.Month(), lt.Day(), lt.Hour(), lt.Minute(), 0, 0, lt.Location())
 	}
-	res["chart_by_min"], err = model.GetCandlestickData(h.db, byMinTime, "%Y-%m-%d %H:%i:00")
-	if err != nil {
-		h.handleError(w, errors.Wrap(err, "model.GetCandlestickData by min"), 500)
-		return
-	}
+	res["chart_by_min"] = model.GetCandlestick1Min(byMinTime)
 
 	byHourTime := BaseTime.Add(-48 * time.Hour)
 	if lt.After(byHourTime) {
 		byHourTime = time.Date(lt.Year(), lt.Month(), lt.Day(), lt.Hour(), 0, 0, 0, lt.Location())
 	}
-	res["chart_by_hour"], err = model.GetCandlestickData(h.db, byHourTime, "%Y-%m-%d %H:00:00")
-	if err != nil {
-		h.handleError(w, errors.Wrap(err, "model.GetCandlestickData by hour"), 500)
-		return
-	}
+	res["chart_by_hour"] = model.GetCandlestick1Hour(byHourTime)
 
 	lowestSellOrder, err := model.GetLowestSellOrder(h.db)
 	switch {
