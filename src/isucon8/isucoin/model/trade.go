@@ -248,6 +248,7 @@ func commitReservedOrder(tx *sql.Tx, order *Order, targets []*Order, reserves []
 func tryTrade(tx *sql.Tx, orderID int64) error {
 	order, err := getOpenOrderByID(tx, orderID)
 	if err != nil {
+		//log.Println("order target", orderID)
 		return err
 	}
 
@@ -293,6 +294,7 @@ func tryTrade(tx *sql.Tx, orderID int64) error {
 			if err == ErrOrderAlreadyClosed {
 				continue
 			}
+			log.Println("TargetOrder", orderID)
 			return errors.Wrap(err, "getOpenOrderByID  buy_order")
 		}
 		if to.Amount > restAmount {

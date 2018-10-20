@@ -51,6 +51,8 @@ func (h *Handler) Initialize(w http.ResponseWriter, r *http.Request, _ httproute
 	banList = make(map[string]int)
 	banMutex = &sync.Mutex{}
 	model.InitializeCandleStack(&BaseTime)
+	infoUpdateMutex.Lock()
+	defer infoUpdateMutex.Unlock()
 	lowestSellOrder = nil
 	highestSellOrder = nil
 	err := h.txScope(func(tx *sql.Tx) error {
