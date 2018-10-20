@@ -2,6 +2,7 @@ package model
 
 import (
 	"database/sql"
+	"fmt"
 	"isucon8/isubank"
 	"time"
 
@@ -83,6 +84,7 @@ func FetchOrderRelation(d QueryExecutor, order *Order) error {
 
 func AddOrder(tx *sql.Tx, ot string, userID, amount, price int64) (*Order, error) {
 	if amount <= 0 || price <= 0 {
+		fmt.Printf("Failed 87 %d, %d\n", amount, price)
 		return nil, ErrParameterInvalid
 	}
 	user, err := getUserByIDWithLock(tx, userID)
@@ -111,6 +113,7 @@ func AddOrder(tx *sql.Tx, ot string, userID, amount, price int64) (*Order, error
 	case OrderTypeSell:
 		// TODO 椅子の保有チェック
 	default:
+		fmt.Printf("Failed 116")
 		return nil, ErrParameterInvalid
 	}
 	res, err := tx.Exec(`INSERT INTO orders (type, user_id, amount, price, created_at) VALUES (?, ?, ?, ?, NOW(6))`, ot, user.ID, amount, price)

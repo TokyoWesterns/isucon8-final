@@ -92,6 +92,7 @@ func UpdateCandleStickData(d QueryExecutor) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var ts uint64
 		var price int64
