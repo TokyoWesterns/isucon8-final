@@ -7,11 +7,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	gctx "github.com/gorilla/context"
 	"github.com/gorilla/sessions"
 	"github.com/julienschmidt/httprouter"
+
+	_ "net/http/pprof"
 )
 
 const (
@@ -35,6 +38,11 @@ func getEnv(key, def string) string {
 }
 
 func main() {
+	runtime.SetBlockProfileRate(1)
+	go func() {
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+	}()
+
 	var (
 		port   = getEnv("APP_PORT", "5000")
 		dbhost = getEnv("DB_HOST", "127.0.0.1")
