@@ -26,7 +26,8 @@ var bankAppId string
 var logEndpoint string
 var logAppId string
 
-func SetSetting(d QueryExecutor) error {
+func SetSetting(d QueryExecutor, k, v string) error {
+	_, err := d.Exec(`INSERT INTO setting (name, val) VALUES (?, ?) ON DUPLICATE KEY UPDATE val = VALUES(val)`, k, v)
 	bankEndpoint = ""
 	bankAppId = ""
 	logEndpoint = ""
@@ -35,15 +36,15 @@ func SetSetting(d QueryExecutor) error {
 }
 
 func GetSetting(d QueryExecutor, k string, memo *string) (string, error) {
-	if memo != "" {
-		return memo, nil
+	if *memo != "" {
+		return *memo, nil
 	}
 
 	s, err := scanSetting(d.Query(`SELECT * FROM setting WHERE name = ?`, k))
 	if err != nil {
 		return "", err
 	}
-	memo = s.Val
+	*memo = s.Val
 	return s.Val, nil
 }
 
