@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"isucon8/isucoin/model"
 	"log"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
-
-	"isucon8/isucoin/model"
 
 	"github.com/gorilla/sessions"
 	"github.com/julienschmidt/httprouter"
@@ -23,6 +23,10 @@ const (
 
 var BaseTime time.Time
 
+var infoUpdateMutex *sync.RWMutex
+var lowestSellOrder *model.Order
+var highestSellOrder *model.Order
+
 type Handler struct {
 	db    *sql.DB
 	store sessions.Store
@@ -31,15 +35,24 @@ type Handler struct {
 func NewHandler(db *sql.DB, store sessions.Store) *Handler {
 	// ISUCON用初期データの基準時間です
 	// この時間以降のデータはInitializeで削除されます
+	banList = make(map[string]int)
+	banMutex = &sync.Mutex{}
+	infoUpdateMutex = &sync.RWMutex{}
 	BaseTime = time.Date(2018, 10, 16, 10, 0, 0, 0, time.Local)
-	return &Handler{
+	h := &Handler{
 		db:    db,
 		store: store,
 	}
+	go h.InfoUpdater()
+	return h
 }
 
 func (h *Handler) Initialize(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	banList = make(map[string]int)
+	banMutex = &sync.Mutex{}
 	model.InitializeCandleStack(&BaseTime)
+	lowestSellOrder = nil
+	highestSellOrder = nil
 	err := h.txScope(func(tx *sql.Tx) error {
 		if err := model.InitBenchmark(tx); err != nil {
 			return err
@@ -102,8 +115,6 @@ func checkBan(bankID string) bool {
 	//return false
 	//
 	if banList == nil {
-		banList = make(map[string]int)
-		banMutex = &sync.Mutex{}
 	}
 	banMutex.Lock()
 	defer banMutex.Unlock()
@@ -173,6 +184,7 @@ func (h *Handler) Signout(w http.ResponseWriter, r *http.Request, _ httprouter.P
 }
 
 func (h *Handler) Info(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+
 	var (
 		err         error
 		lastTradeID int64
@@ -212,10 +224,9 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request, _ httprouter.Para
 		}
 		res["traded_orders"] = orders
 	}
-	if err := model.UpdateCandleStickData(h.db); err != nil {
-		h.handleError(w, errors.Wrap(err, "model.GetCandlestickData by sec"), 500)
-		return
-	}
+
+	infoUpdateMutex.RLock()
+	defer infoUpdateMutex.RUnlock()
 
 	bySecTime := BaseTime.Add(-300 * time.Second)
 	if lt.After(bySecTime) {
@@ -235,24 +246,11 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request, _ httprouter.Para
 	}
 	res["chart_by_hour"] = model.GetCandlestick1Hour(byHourTime)
 
-	lowestSellOrder, err := model.GetLowestSellOrder(h.db)
-	switch {
-	case err == sql.ErrNoRows:
-	case err != nil:
-		h.handleError(w, errors.Wrap(err, "model.GetLowestSellOrder"), 500)
-		return
-	default:
+	if lowestSellOrder != nil {
 		res["lowest_sell_price"] = lowestSellOrder.Price
 	}
-
-	highestBuyOrder, err := model.GetHighestBuyOrder(h.db)
-	switch {
-	case err == sql.ErrNoRows:
-	case err != nil:
-		h.handleError(w, errors.Wrap(err, "model.GetHighestBuyOrder"), 500)
-		return
-	default:
-		res["highest_buy_price"] = highestBuyOrder.Price
+	if highestSellOrder != nil {
+		res["highest_buy_price"] = highestSellOrder.Price
 	}
 	// TODO: trueにするとシェアボタンが有効になるが、アクセスが増えてヤバイので一旦falseにしておく
 	res["enable_share"] = true
@@ -423,4 +421,34 @@ func (h *Handler) txScope(f func(*sql.Tx) error) (err error) {
 	}()
 	err = f(tx)
 	return
+}
+
+func (h *Handler) InfoUpdater() {
+	t := time.NewTicker(250 * time.Millisecond)
+	for {
+		select {
+		case <-t.C:
+			func() {
+				infoUpdateMutex.Lock()
+				defer infoUpdateMutex.Unlock()
+				if err := model.UpdateCandleStickData(h.db); err != nil {
+					fmt.Errorf("%s\n", err)
+				}
+				var err error
+				lowestSellOrder, err = model.GetLowestSellOrder(h.db)
+				if err == sql.ErrNoRows {
+					lowestSellOrder = nil
+				} else if err != nil {
+					fmt.Errorf("errorLowestsellOrder: %s", err)
+
+				}
+				highestSellOrder, err = model.GetHighestBuyOrder(h.db)
+				if err == sql.ErrNoRows {
+					highestSellOrder = nil
+				} else if err != nil {
+					fmt.Errorf("errorHigestsellOrder: %s", err)
+				}
+			}()
+		}
+	}
 }
